@@ -1,0 +1,11 @@
+[package]
+name = "muffle"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+color-eyre = "0.6.5"
+pipewire = "0.10.0"
+regex = "1.12.3"
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
