@@ -1,26 +1,30 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, hash_map};
+use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::Result;
+use parking_lot::RwLock;
 use pipewire::context::ContextRc;
 use pipewire::main_loop::MainLoopRc;
 use pipewire::properties::PropertiesBox;
 use pipewire::registry::{self, GlobalObject, RegistryRc};
 use pipewire::spa::utils::dict::DictRef;
 use pipewire::types::ObjectType;
-use regex::Regex;
 
-use crate::config::{Config, Rule};
+use crate::config::Config;
 
 mod config;
 
+const CONFIG_PATH: &str = "muffle.toml";
+
 fn main() -> Result<()> {
+    let config = Config::watch(CONFIG_PATH)?;
     let mainloop = MainLoopRc::new(None)?;
     let context = ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
     let registry = core.get_registry_rc()?;
-    let _app = App::new(registry);
+    let _app = App::new(config, registry);
 
     mainloop.run();
 
@@ -28,19 +32,19 @@ fn main() -> Result<()> {
 }
 
 struct App {
+    config: Arc<RwLock<Config>>,
     registry_listener: Option<registry::Listener>,
     registry: RegistryRc,
     objects: HashMap<u32, Rc<GlobalObject<PropertiesBox>>>,
-    regex_cache: RefCell<HashMap<String, Rc<Regex>>>,
 }
 
 impl App {
-    fn new(registry: RegistryRc) -> Rc<RefCell<Self>> {
+    fn new(config: Arc<RwLock<Config>>, registry: RegistryRc) -> Rc<RefCell<Self>> {
         let this = Rc::new(RefCell::new(Self {
+            config,
             registry_listener: None,
             registry,
             objects: HashMap::new(),
-            regex_cache: RefCell::new(HashMap::new()),
         }));
 
         let listener = this
@@ -73,6 +77,8 @@ impl App {
     }
 
     fn on_link(&mut self, object: &GlobalObject<PropertiesBox>) {
+        let config = self.config.read();
+
         let Some(props) = &object.props else {
             eprintln!("Link without props");
             return;
@@ -97,17 +103,17 @@ impl App {
             println!("input node has no app name: {input_node:#?}")
         }
 
-        // let output_is_game = output_name == "ForbiddenSolitaire.exe";
-        // let input_is_discord = input_name == "discord_capture";
-
-        // let link_is_allowed = !input_is_discord || output_is_game;
         let link_is_allowed = self.link_is_allowed(output_name, input_name);
         let icon = if link_is_allowed { '✅' } else { '❌' };
 
         println!("{icon} {output_name} -> {input_name}");
+
         if !link_is_allowed {
-            self.registry.destroy_global(object.id);
-            println!("Removed link");
+            if config.log_only {
+                eprintln!("(log_only = true; link not removed)")
+            } else {
+                self.registry.destroy_global(object.id);
+            }
         }
     }
 
@@ -153,56 +159,18 @@ impl App {
     }
 
     fn link_is_allowed(&self, output_name: &str, input_name: &str) -> bool {
-        let config = match Config::load("muffle.toml") {
-            Ok(config) => config,
-            Err(err) => {
-                eprintln!("Failed to load config: {err:?}");
-                return true;
-            }
-        };
+        let config = self.config.read();
 
-        for rule in config.rules {
-            let input_pattern = match self.get_regex(rule.input_pattern) {
-                Ok(pattern) => pattern,
-                Err(err) => {
-                    eprintln!("Invalid input_pattern: {err:?}");
-                    return true;
-                }
-            };
-
-            if !input_pattern.is_match(input_name) {
+        for rule in &config.rules {
+            if !rule.input_pattern.is_match(input_name) {
                 continue;
             }
 
-            let output_allow_pattern = match self.get_regex(rule.output_allow_pattern) {
-                Ok(pattern) => pattern,
-                Err(err) => {
-                    eprintln!("Invalid output_allow_pattern: {err:?}");
-                    return true;
-                }
-            };
-
-            if !output_allow_pattern.is_match(output_name) {
+            if !rule.output_allow_pattern.is_match(output_name) {
                 return false;
             }
         }
 
         true
-    }
-
-    fn get_regex(&self, pattern: String) -> Result<Rc<Regex>> {
-        let mut regex_cache = self.regex_cache.borrow_mut();
-
-        match regex_cache.entry(pattern) {
-            hash_map::Entry::Occupied(entry) => Ok(entry.get().clone()),
-            hash_map::Entry::Vacant(entry) => {
-                let regex = Regex::new(entry.key()).context("invalid pattern")?;
-                let regex = Rc::new(regex);
-
-                entry.insert(regex.clone());
-
-                Ok(regex)
-            }
-        }
     }
 }

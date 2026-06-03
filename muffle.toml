@@ -1,3 +1,5 @@
+log_only = true
+
 [[rules]]
 input_pattern = '^discord_capture$'
-output_allow_pattern = '^.*\.exe'
+output_allow_pattern = '^.*\.exe$|FMOD'
