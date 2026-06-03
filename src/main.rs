@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use chumsky::Parser;
 use color_eyre::eyre::Result;
 use parking_lot::RwLock;
 use pipewire::context::ContextRc;
@@ -15,6 +16,8 @@ use pipewire::types::ObjectType;
 use crate::config::Config;
 
 mod config;
+mod filter;
+mod parsing;
 
 const CONFIG_PATH: &str = "muffle.toml";
 
@@ -160,13 +163,13 @@ impl App {
 
     fn link_is_allowed(&self, output_name: &str, input_name: &str) -> bool {
         let config = self.config.read();
+        let context = &filter::Context {
+            output_name,
+            input_name,
+        };
 
-        for rule in &config.rules {
-            if !rule.input_pattern.is_match(input_name) {
-                continue;
-            }
-
-            if !rule.output_allow_pattern.is_match(output_name) {
+        for filter in &config.unlink {
+            if filter.eval(context) {
                 return false;
             }
         }

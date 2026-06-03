@@ -8,10 +8,12 @@ use inotify::{Inotify, WatchMask};
 use parking_lot::RwLock;
 use serde::Deserialize;
 
+use crate::filter;
+
 #[derive(Deserialize)]
 pub struct Config {
     pub log_only: bool,
-    pub rules: Vec<Rule>,
+    pub unlink: Vec<filter::Expr>,
 }
 
 impl Config {

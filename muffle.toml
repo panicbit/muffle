@@ -1,5 +1,4 @@
 log_only = false
-
-[[rules]]
-input_pattern = '^discord_capture$'
-output_allow_pattern = '^.*\.exe$|FMOD'
+unlink = [
+    'input /^discord_capture$/ and not (output /^.*\.exe$/ or output /FMOD/)',
+]
