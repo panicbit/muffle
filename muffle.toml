@@ -1,4 +1,4 @@
-log_only = true
+log_only = false
 
 [[rules]]
 input_pattern = '^discord_capture$'
