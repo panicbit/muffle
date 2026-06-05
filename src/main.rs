@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use chumsky::Parser;
 use color_eyre::eyre::Result;
 use parking_lot::RwLock;
 use pipewire::context::ContextRc;
