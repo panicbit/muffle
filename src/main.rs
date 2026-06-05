@@ -21,6 +21,7 @@ mod parsing;
 const CONFIG_PATH: &str = "muffle.toml";
 
 fn main() -> Result<()> {
+    color_eyre::install()?;
     let config = Config::watch(CONFIG_PATH)?;
     let mainloop = MainLoopRc::new(None)?;
     let context = ContextRc::new(&mainloop, None)?;
