@@ -48,7 +48,7 @@ fn log_rotate_writer() -> Result<impl Write> {
     Ok(FileRotate::new(
         log_path,
         AppendCount::new(3),
-        ContentLimit::Lines(3),
+        ContentLimit::Lines(1_000),
         Compression::None,
         None,
     ))
