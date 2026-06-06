@@ -11,17 +11,20 @@ use pipewire::properties::PropertiesBox;
 use pipewire::registry::{self, GlobalObject, RegistryRc};
 use pipewire::spa::utils::dict::DictRef;
 use pipewire::types::ObjectType;
+use tracing::{error, info, warn};
 
 use crate::config::Config;
 
 mod config;
 mod filter;
+mod logging;
 mod parsing;
 
 const CONFIG_PATH: &str = "muffle.toml";
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+    logging::init()?;
     let config = Config::watch(CONFIG_PATH)?;
     let mainloop = MainLoopRc::new(None)?;
     let context = ContextRc::new(&mainloop, None)?;
@@ -83,16 +86,16 @@ impl App {
         let config = self.config.read();
 
         let Some(props) = &object.props else {
-            eprintln!("Link without props");
+            warn!("Link without props");
             return;
         };
 
         let Some(output_node) = self.resolve_object(props, "link.output.node") else {
-            eprintln!("Link without output node: {object:#?}");
+            warn!("Link without output node: {object:#?}");
             return;
         };
         let Some(input_node) = self.resolve_object(props, "link.input.node") else {
-            eprintln!("Link without input node: {object:#?}");
+            warn!("Link without input node: {object:#?}");
             return;
         };
 
@@ -100,20 +103,20 @@ impl App {
         let input_name = self.resolve_label(input_node);
 
         if output_name.is_empty() {
-            println!("output node has no app name: {output_node:#?}")
+            warn!("output node has no app name: {output_node:#?}")
         }
         if input_name.is_empty() {
-            println!("input node has no app name: {input_node:#?}")
+            warn!("input node has no app name: {input_node:#?}")
         }
 
         let link_is_allowed = self.link_is_allowed(output_name, input_name);
         let icon = if link_is_allowed { '✅' } else { '❌' };
 
-        println!("{icon} {output_name} -> {input_name}");
+        info!("{icon} {output_name} -> {input_name}");
 
         if !link_is_allowed {
             if config.log_only {
-                eprintln!("(log_only = true; link not removed)")
+                warn!("(log_only = true; link not removed)")
             } else {
                 self.registry.destroy_global(object.id);
             }
@@ -130,12 +133,12 @@ impl App {
             .get(key)
             .and_then(|node_id| node_id.parse::<u32>().ok())
         else {
-            eprintln!("Missing `{key}`!");
+            warn!("Missing `{key}`!");
             return None;
         };
 
         let Some(node) = self.objects.get(&object_id) else {
-            eprintln!("Missing object with id `{object_id}`!");
+            warn!("Missing object with id `{object_id}`!");
             return None;
         };
 
@@ -157,7 +160,7 @@ impl App {
 
     fn on_global_remove(&mut self, id: u32) {
         if self.objects.remove(&id).is_none() {
-            eprintln!("Tried to remove global <{id}>, but it did not exist")
+            error!("Tried to remove global <{id}>, but it did not exist")
         }
     }
 

@@ -6,6 +6,7 @@ use color_eyre::eyre::{Context, Result};
 use inotify::{Inotify, WatchMask};
 use parking_lot::RwLock;
 use serde::Deserialize;
+use tracing::{error, info, warn};
 
 use crate::filter;
 
@@ -46,30 +47,30 @@ impl Config {
                     let events = match inotify.read_events_blocking(&mut buffer) {
                         Ok(events) => events,
                         Err(err) => {
-                            eprintln!("Error reading inotify events: {err}");
-                            eprintln!("Stopping config update.");
+                            error!("Error reading inotify events: {err}");
+                            warn!("Stopping config update.");
                             return;
                         }
                     };
 
                     let need_reload = events
-                        // .inspect(|event| eprintln!("inotify: {event:?}"))
+                        // .inspect(|event| debug!("inotify: {event:?}"))
                         .last()
                         .is_some();
 
                     if need_reload {
-                        eprintln!("🔄 Reloading config...");
+                        info!("🔄 Reloading config...");
 
                         let new_config = match Self::load(&path) {
                             Ok(new_config) => new_config,
                             Err(err) => {
-                                eprintln!("Failed to load config: {err}");
+                                error!("Failed to load config: {err}");
                                 continue;
                             }
                         };
 
                         *config.write() = new_config;
-                        eprintln!("Config reload successful.");
+                        info!("Config reload successful.");
                     }
                 }
             });
