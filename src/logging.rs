@@ -18,7 +18,6 @@ pub fn init() -> Result<()> {
         .with_target(false)
         .finish();
     let file_subscriber = fmt::layer()
-        .without_time()
         .with_target(false)
         .with_writer(Mutex::new(log_rotate_writer()?));
 
