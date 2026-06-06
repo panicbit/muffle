@@ -7,6 +7,8 @@ edition = "2024"
 ariadne = "0.6.0"
 chumsky = { version = "0.13.0", features = ["pratt"] }
 color-eyre = "0.6.5"
+directories = "6.0.0"
+file-rotate = "0.8.0"
 inotify = "0.11.2"
 parking_lot = "0.12.5"
 pipewire = "0.10.0"
