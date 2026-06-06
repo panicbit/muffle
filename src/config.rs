@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, thread};
 
-use ::regex::Regex;
 use color_eyre::eyre::{Context, Result};
 use inotify::{Inotify, WatchMask};
 use parking_lot::RwLock;
@@ -77,25 +76,5 @@ impl Config {
         }
 
         Ok(config)
-    }
-}
-
-#[derive(Deserialize)]
-pub struct Rule {
-    #[serde(with = "regex")]
-    pub input_pattern: Regex,
-    #[serde(with = "regex")]
-    pub output_allow_pattern: Regex,
-}
-
-mod regex {
-    use regex::Regex;
-    use serde::{Deserialize, Deserializer, de};
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Regex, D::Error> {
-        let pattern = String::deserialize(de)?;
-        let regex = Regex::new(&pattern).map_err(de::Error::custom)?;
-
-        Ok(regex)
     }
 }
