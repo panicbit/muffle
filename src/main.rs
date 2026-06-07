@@ -103,10 +103,10 @@ impl App {
         let input_name = self.resolve_label(input_node);
 
         if output_name.is_empty() {
-            warn!("output node has no app name: {output_node:#?}")
+            warn!("output node has no label: {output_node:#?}")
         }
         if input_name.is_empty() {
-            warn!("input node has no app name: {input_node:#?}")
+            warn!("input node has no label: {input_node:#?}")
         }
 
         let link_is_allowed = self.link_is_allowed(output_name, input_name);
