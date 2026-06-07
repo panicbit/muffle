@@ -7,21 +7,25 @@ use color_eyre::eyre::{Context, ContextCompat, Result};
 use file_rotate::compression::Compression;
 use file_rotate::suffix::AppendCount;
 use file_rotate::{ContentLimit, FileRotate};
-use tracing::Level;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{FmtSubscriber, fmt};
+use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn init() -> Result<()> {
-    let terminal_subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .without_time()
-        .with_target(false)
-        .finish();
-    let file_subscriber = fmt::layer()
+    let terminal = fmt::layer().without_time().with_target(false);
+    let file = fmt::layer()
         .with_target(false)
         .with_writer(Mutex::new(log_rotate_writer()?));
+    let env = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
 
-    tracing::subscriber::set_global_default(terminal_subscriber.with(file_subscriber))
+    let subscriber = tracing_subscriber::registry()
+        .with(terminal)
+        .with(file)
+        .with(env);
+
+    tracing::subscriber::set_global_default(subscriber)
         .context("failed to set default tracing subscriber")?;
 
     Ok(())
