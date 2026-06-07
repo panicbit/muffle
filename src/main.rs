@@ -4,9 +4,12 @@ use std::rc::Rc;
 
 use color_eyre::eyre::{Context, Result};
 use pipewire::context::ContextRc;
-use pipewire::keys;
+use pipewire::core::CoreRc;
+use pipewire::keys::{
+    self, LINK_INPUT_NODE, LINK_INPUT_PORT, LINK_OUTPUT_NODE, LINK_OUTPUT_PORT, OBJECT_LINGER,
+};
 use pipewire::main_loop::MainLoopRc;
-use pipewire::properties::PropertiesBox;
+use pipewire::properties::{PropertiesBox, properties};
 use pipewire::registry::{self, GlobalObject, RegistryRc};
 use pipewire::spa::utils::dict::DictRef;
 use pipewire::types::ObjectType;
@@ -31,7 +34,7 @@ fn main() -> Result<()> {
     let context = ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
     let registry = core.get_registry_rc()?;
-    let app = App::new(config, registry);
+    let app = App::new(config, core, registry);
     let _attached_config_rx = config_rx.attach(mainloop.loop_(), move |config| {
         app.borrow_mut().on_config(config);
     });
@@ -43,6 +46,7 @@ fn main() -> Result<()> {
 
 struct App {
     config: Config,
+    core: CoreRc,
     registry_listener: Option<registry::Listener>,
     registry: RegistryRc,
     objects: HashMap<u32, Rc<GlobalObject<PropertiesBox>>>,
@@ -50,9 +54,10 @@ struct App {
 }
 
 impl App {
-    fn new(config: Config, registry: RegistryRc) -> Rc<RefCell<Self>> {
+    fn new(config: Config, core: CoreRc, registry: RegistryRc) -> Rc<RefCell<Self>> {
         let this = Rc::new(RefCell::new(Self {
             config,
+            core,
             registry_listener: None,
             registry,
             objects: HashMap::new(),
@@ -81,6 +86,8 @@ impl App {
     fn on_config(&mut self, config: Config) {
         self.config = config;
         info!("📝 New config applied.");
+
+        self.recheck();
     }
 
     fn on_global(&mut self, object: &GlobalObject<&DictRef>) {
@@ -139,7 +146,7 @@ impl App {
             warn!("input node has no label: {input_node:#?}")
         }
 
-        let link_is_allowed = self.link_is_allowed(output_name, input_name);
+        let link_is_allowed = self.link_is_allowed_by_name(output_name, input_name);
         let icon = if link_is_allowed { '✅' } else { '❌' };
 
         info!("{icon} {output_name} -> {input_name}");
@@ -160,6 +167,12 @@ impl App {
         Some(node)
     }
 
+    fn resolve_label_by_id(&self, object: u32) -> &str {
+        self.resolve_object(object)
+            .map(|object| self.resolve_label(object))
+            .unwrap_or_default()
+    }
+
     fn resolve_label<'a>(&self, object: &'a GlobalObject<PropertiesBox>) -> &'a str {
         object
             .props
@@ -174,7 +187,21 @@ impl App {
             .unwrap_or_default()
     }
 
-    fn link_is_allowed(&self, output_name: &str, input_name: &str) -> bool {
+    fn link_is_allowed_by_id(&self, output_node: u32, input_node: u32) -> bool {
+        let output_name = self.resolve_label_by_id(output_node);
+        let input_name = self.resolve_label_by_id(input_node);
+
+        if output_name.is_empty() {
+            warn!("output node has no label: {output_node:#?}")
+        }
+        if input_name.is_empty() {
+            warn!("input node has no label: {input_node:#?}")
+        }
+
+        self.link_is_allowed_by_name(output_name, input_name)
+    }
+
+    fn link_is_allowed_by_name(&self, output_name: &str, input_name: &str) -> bool {
         let context = &filter::Context {
             output_name,
             input_name,
@@ -218,5 +245,58 @@ impl App {
         debug!("num retained links: {}", self.destroyed_links.len());
 
         Ok(())
+    }
+
+    fn recheck(&mut self) {
+        self.recheck_existing_links();
+        self.recheck_destroyed_links();
+    }
+
+    fn recheck_existing_links(&mut self) {
+        let links = self
+            .objects
+            .values()
+            .filter(|object| object.type_ == ObjectType::Link)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for link in links {
+            if let Err(err) = self.on_link(&link) {
+                error!("Failed to recheck link: {err}");
+            }
+        }
+    }
+
+    fn recheck_destroyed_links(&mut self) {
+        for i in (0..self.destroyed_links.len()).rev() {
+            let link = &self.destroyed_links[i];
+            let link_allowed = self.link_is_allowed_by_id(link.output_node(), link.input_node());
+
+            if link_allowed {
+                self.restore_link(link);
+                self.destroyed_links.swap_remove(i);
+            }
+        }
+    }
+
+    fn restore_link(&self, link: &Link) {
+        let result = self.core.create_object::<pipewire::link::Link>(
+            "link-factory",
+            &properties! {
+                *LINK_OUTPUT_NODE => link.output_node().to_string(),
+                *LINK_OUTPUT_PORT => link.output_port().to_string(),
+                *LINK_INPUT_NODE => link.input_node().to_string(),
+                *LINK_INPUT_PORT => link.input_port().to_string(),
+                *OBJECT_LINGER => "true",
+            },
+        );
+
+        let output_name = self.resolve_label_by_id(link.output_node());
+        let input_name = self.resolve_label_by_id(link.input_node());
+
+        match result {
+            Ok(_) => info!("🩹 Restored: {output_name} -> {input_name}"),
+            Err(_) => error!("💥 Failed to restore link"),
+        }
     }
 }
