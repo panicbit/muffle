@@ -6,6 +6,7 @@ use std::sync::Arc;
 use color_eyre::eyre::Result;
 use parking_lot::RwLock;
 use pipewire::context::ContextRc;
+use pipewire::keys;
 use pipewire::main_loop::MainLoopRc;
 use pipewire::properties::PropertiesBox;
 use pipewire::registry::{self, GlobalObject, RegistryRc};
@@ -90,11 +91,11 @@ impl App {
             return;
         };
 
-        let Some(output_node) = self.resolve_object(props, "link.output.node") else {
+        let Some(output_node) = self.resolve_object(props, &keys::LINK_OUTPUT_NODE) else {
             warn!("Link without output node: {object:#?}");
             return;
         };
-        let Some(input_node) = self.resolve_object(props, "link.input.node") else {
+        let Some(input_node) = self.resolve_object(props, &keys::LINK_INPUT_NODE) else {
             warn!("Link without input node: {object:#?}");
             return;
         };
@@ -151,9 +152,10 @@ impl App {
             .as_ref()
             .and_then(|props| {
                 props
-                    .get("application.name")
-                    .or_else(|| props.get("node.description"))
-                    .or_else(|| props.get("node.name"))
+                    .get(&keys::APP_NAME)
+                    .or_else(|| props.get(&keys::APP_ID))
+                    .or_else(|| props.get(&keys::NODE_DESCRIPTION))
+                    .or_else(|| props.get(&keys::NODE_NAME))
             })
             .unwrap_or_default()
     }
