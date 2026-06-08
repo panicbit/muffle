@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{fs, thread};
 
 use color_eyre::eyre::{Context, Result};
-use inotify::{Inotify, WatchMask};
+use debounce::EventDebouncer;
+use inotify::{EventMask, Inotify, WatchMask};
 use pipewire::channel::Receiver;
 use serde::Deserialize;
 use tracing::{error, info, warn};
@@ -36,6 +38,23 @@ impl Config {
             .add(&path, WatchMask::MODIFY)
             .context("Failed to watch config file")?;
 
+        let delay = Duration::from_millis(100);
+        let debouncer = EventDebouncer::new(delay, {
+            move |_event_mask: EventMask| {
+                info!("🔄 Reloading config...");
+
+                let new_config = match Self::load(&path) {
+                    Ok(new_config) => new_config,
+                    Err(err) => {
+                        error!("Failed to load config: {err}");
+                        return;
+                    }
+                };
+
+                tx.send(new_config).ok();
+            }
+        });
+
         thread::spawn(move || {
             let mut buffer = [0; 4096];
 
@@ -49,23 +68,8 @@ impl Config {
                     }
                 };
 
-                let need_reload = events
-                    // .inspect(|event| debug!("inotify: {event:?}"))
-                    .last()
-                    .is_some();
-
-                if need_reload {
-                    info!("🔄 Reloading config...");
-
-                    let new_config = match Self::load(&path) {
-                        Ok(new_config) => new_config,
-                        Err(err) => {
-                            error!("Failed to load config: {err}");
-                            continue;
-                        }
-                    };
-
-                    tx.send(new_config).ok();
+                for event in events {
+                    debouncer.put(event.mask);
                 }
             }
         });
