@@ -46,7 +46,7 @@ impl Config {
                 let new_config = match Self::load(&path) {
                     Ok(new_config) => new_config,
                     Err(err) => {
-                        error!("Failed to load config: {err}");
+                        error!("Failed to load config: {err:?}");
                         return;
                     }
                 };

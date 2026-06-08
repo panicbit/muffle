@@ -12,10 +12,14 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
 pub fn init() -> Result<()> {
-    let terminal = fmt::layer().without_time().with_target(false);
+    let terminal = fmt::layer()
+        .without_time()
+        .with_target(false)
+        .with_ansi_sanitization(false);
     let file = fmt::layer()
         .with_target(false)
-        .with_writer(Mutex::new(log_rotate_writer()?));
+        .with_writer(Mutex::new(log_rotate_writer()?))
+        .with_ansi_sanitization(false);
     let env = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
