@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use color_eyre::eyre::{Context, Result};
 use pipewire::context::ContextRc;
-use pipewire::core::CoreRc;
+use pipewire::core::{self, CoreRc, PW_ID_CORE};
 use pipewire::keys::{
     self, LINK_INPUT_NODE, LINK_INPUT_PORT, LINK_OUTPUT_NODE, LINK_OUTPUT_PORT, OBJECT_LINGER,
 };
@@ -12,6 +12,7 @@ use pipewire::main_loop::MainLoopRc;
 use pipewire::properties::{PropertiesBox, properties};
 use pipewire::registry::{self, GlobalObject, RegistryRc};
 use pipewire::spa::utils::dict::DictRef;
+use pipewire::spa::utils::result::AsyncSeq;
 use pipewire::types::ObjectType;
 use tracing::{debug, error, info, warn};
 
@@ -23,6 +24,7 @@ mod filter;
 mod link;
 mod logging;
 mod parsing;
+mod signal;
 
 const CONFIG_PATH: &str = "muffle.toml";
 
@@ -34,7 +36,20 @@ fn main() -> Result<()> {
     let context = ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
     let registry = core.get_registry_rc()?;
-    let app = App::new(config, core, registry);
+    let app = App::new(config, mainloop.clone(), core, registry);
+
+    let _attached_shutdown_rx = signal::shutdown().attach(mainloop.loop_(), {
+        let app = app.clone();
+
+        move |_| {
+            let mut app = app.borrow_mut();
+
+            if app.shutdown_seq.is_none() {
+                app.on_shutdown();
+            }
+        }
+    });
+
     let _attached_config_rx = config_rx.attach(mainloop.loop_(), move |config| {
         app.borrow_mut().on_config(config);
     });
@@ -46,25 +61,56 @@ fn main() -> Result<()> {
 
 struct App {
     config: Config,
+    mainloop: MainLoopRc,
     core: CoreRc,
-    registry_listener: Option<registry::Listener>,
+    core_listener: Option<core::Listener>,
+    shutdown_seq: Option<AsyncSeq>,
     registry: RegistryRc,
+    registry_listener: Option<registry::Listener>,
     objects: HashMap<u32, Rc<GlobalObject<PropertiesBox>>>,
     destroyed_links: Vec<Link>,
 }
 
 impl App {
-    fn new(config: Config, core: CoreRc, registry: RegistryRc) -> Rc<RefCell<Self>> {
+    fn new(
+        config: Config,
+        mainloop: MainLoopRc,
+        core: CoreRc,
+        registry: RegistryRc,
+    ) -> Rc<RefCell<Self>> {
         let this = Rc::new(RefCell::new(Self {
             config,
+            mainloop,
             core,
-            registry_listener: None,
+            core_listener: None,
+            shutdown_seq: None,
             registry,
+            registry_listener: None,
             objects: HashMap::new(),
             destroyed_links: Vec::new(),
         }));
 
-        let listener = this
+        let done_listener = this
+            .borrow()
+            .core
+            .add_listener_local()
+            .done({
+                let this = this.clone();
+
+                move |id, seq| {
+                    let this = this.borrow();
+
+                    if id == PW_ID_CORE && Some(seq) == this.shutdown_seq {
+                        info!("Exiting.");
+                        this.mainloop.quit();
+                    }
+                }
+            })
+            .register();
+
+        this.borrow_mut().core_listener = Some(done_listener);
+
+        let registry_listener = this
             .borrow()
             .registry
             .add_listener_local()
@@ -78,12 +124,16 @@ impl App {
             })
             .register();
 
-        this.borrow_mut().registry_listener = Some(listener);
+        this.borrow_mut().registry_listener = Some(registry_listener);
 
         this
     }
 
     fn on_config(&mut self, config: Config) {
+        if self.shutdown_seq.is_some() {
+            return;
+        }
+
         self.config = config;
         info!("📝 New config applied.");
 
@@ -91,6 +141,10 @@ impl App {
     }
 
     fn on_global(&mut self, object: &GlobalObject<&DictRef>) {
+        if self.shutdown_seq.is_some() {
+            return;
+        }
+
         let object = Rc::new(object.to_owned());
 
         self.objects.insert(object.id, object.clone());
@@ -106,6 +160,10 @@ impl App {
     }
 
     fn on_global_remove(&mut self, id: u32) {
+        if self.shutdown_seq.is_some() {
+            return;
+        }
+
         let Some(object) = self.objects.remove(&id) else {
             error!("Tried to remove global <{id}>, but it did not exist");
             return;
@@ -232,6 +290,10 @@ impl App {
     }
 
     fn on_port_remove(&mut self, object: &GlobalObject<PropertiesBox>) -> Result<()> {
+        if self.shutdown_seq.is_some() {
+            return Ok(());
+        }
+
         self.destroyed_links.retain(|link| {
             let retain = !link.contains_port(object.id);
 
@@ -248,8 +310,8 @@ impl App {
     }
 
     fn recheck(&mut self) {
-        self.recheck_existing_links();
         self.recheck_destroyed_links();
+        self.recheck_existing_links();
     }
 
     fn recheck_existing_links(&mut self) {
@@ -272,7 +334,7 @@ impl App {
             let link = &self.destroyed_links[i];
             let link_allowed = self.link_is_allowed_by_id(link.output_node(), link.input_node());
 
-            if link_allowed {
+            if link_allowed || self.config.log_only {
                 self.restore_link(link);
                 self.destroyed_links.swap_remove(i);
             }
@@ -298,5 +360,15 @@ impl App {
             Ok(_) => info!("🩹 Restored: {output_name} -> {input_name}"),
             Err(_) => error!("💥 Failed to restore link"),
         }
+    }
+
+    fn on_shutdown(&mut self) {
+        self.config.unlink = Vec::new();
+
+        self.recheck();
+
+        self.shutdown_seq = Some(self.core.sync(0).expect("failed to pw sync"));
+
+        info!("👋 Bye!");
     }
 }

@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use std::{fs, thread};
 
 use color_eyre::eyre::{Context, Result};
