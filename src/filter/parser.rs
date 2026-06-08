@@ -30,13 +30,17 @@ pub fn parser<'a>() -> impl P<'a, Expr> {
 }
 
 fn op<'a>(s: &'a str) -> impl P<'a, &'a str> + Clone {
-    just(s).padded()
+    keyword(s).padded()
+}
+
+fn keyword<'a>(s: &'a str) -> impl P<'a, &'a str> + Clone {
+    just(s).labelled(format!("\'{s}\'"))
 }
 
 fn port<'a>() -> impl P<'a, Port> + Clone {
     choice((
-        just("input").to(Port::Input),
-        just("output").to(Port::Output),
+        keyword("input").to(Port::Input),
+        keyword("output").to(Port::Output),
     ))
 }
 
